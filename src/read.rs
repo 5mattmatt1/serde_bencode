@@ -4,6 +4,9 @@ use crate::error::{Error, Result};
 // Where is Private::Sealed implemented
 pub trait Read<'de> {
     #[doc(hidden)]
+    fn read_bytes(&mut self, len: usize) -> Result<&'de [u8]>;
+
+    #[doc(hidden)]
     fn read_str(&mut self, len: usize) -> Result<&'de str>;
 
     #[doc(hidden)]
@@ -47,6 +50,18 @@ impl<'a> StrRead<'a> {
 }
 
 impl<'a> Read<'a> for SliceRead<'a> {
+    #[inline]
+    fn read_bytes(&mut self, len: usize) -> Result<&'a [u8]>
+    {
+        if self.index + len - 1 < self.slice.len() {
+            let bytes = &self.slice[self.index..self.index+len];
+            self.index += len;
+            Ok(bytes)
+        } else {
+            Err(Error::IndexError)
+        }
+    }
+
     #[inline]
     fn read_str(&mut self, len: usize) -> Result<&'a str>
     {
@@ -92,6 +107,12 @@ impl<'a> Read<'a> for SliceRead<'a> {
 // Seems unsafe...
 // Shouldn't I ensure that it is valid UTF-8 for every next and peek?
 impl<'a> Read<'a> for StrRead<'a> {
+    #[inline]
+    fn read_bytes(&mut self, len: usize) -> Result<&'a [u8]>
+    {
+        self.delegate.read_bytes(len)
+    }
+
     #[inline]
     fn read_str(&mut self, len: usize) -> Result<&'a str>
     {

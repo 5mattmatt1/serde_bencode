@@ -68,6 +68,10 @@ impl<'de, R> Read<'de> for Deserializer<R>
 where
     R: Read<'de>
 {
+    fn read_bytes(&mut self, len: usize) -> Result<&'de [u8]>
+    {
+        self.read.read_bytes(len)
+    }
 
     fn read_str(&mut self, len: usize) -> Result<&'de str>
     {
@@ -175,6 +179,35 @@ where
         }
         // Why is this unreachable?
         self.read_str(len)
+    }
+
+    fn parse_bytes(&mut self) -> Result<&'de [u8]> 
+    {
+        let mut len = match self.next()? as char {
+            ch @ '0'..='9' => usize::from(ch as u8 - b'0'),
+            _ => {
+                return Err(Error::ExpectedInteger);
+            }
+        };
+
+        loop {
+            match self.next()? as char {
+                ch @ '0'..='9' => {
+                    // self.input = &self.input[1..];
+                    len *= 10 as usize;
+                    len += usize::from(ch as u8 - b'0');
+                }
+                ':' => {
+                    // self.input = &self.input[1..];
+                    break;
+                }
+                _ => {
+                    return Err(Error::ExpectedColon)
+                }
+            }
+        }
+        // // Why is this unreachable?
+        self.read_bytes(len)
     }
 }
 
@@ -396,11 +429,12 @@ impl<'de, 'a, R: Read<'de> + 'a> de::Deserializer<'de> for &'a mut Deserializer<
         // unimplemented!()
     }
 
-    fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
         where
             V: Visitor<'de>,
     {
-        unimplemented!()
+        // println!("{}", self.parse_bytes()?)
+        visitor.visit_borrowed_bytes(self.parse_bytes()?)
     }
 
     fn deserialize_byte_buf<V>(self, _visitor: V) -> Result<V::Value>

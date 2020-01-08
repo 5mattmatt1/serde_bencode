@@ -185,4 +185,13 @@ mod tests {
         assert!(example_de.a == "hello");
         assert!(example_de.b.a == "world");
     }
+
+    #[test]
+    fn de_bytes()
+    {
+        use crate::de;
+        let example: String = "1:a".to_string();
+        let example_de: &[u8] = de::from_str(&example).unwrap();
+        assert!(example_de == vec!['a' as u8].as_slice())
+    }
 }
