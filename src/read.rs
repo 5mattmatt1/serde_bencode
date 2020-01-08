@@ -4,10 +4,13 @@ use crate::error::{Error, Result};
 // Where is Private::Sealed implemented
 pub trait Read<'de> {
     #[doc(hidden)]
-    fn next(&mut self) -> Result<Option<u8>>;
+    fn read_str(&mut self, len: usize) -> Result<&'de str>;
 
     #[doc(hidden)]
-    fn peek(&mut self) -> Result<Option<u8>>;
+    fn next(&mut self) -> Result<u8>;
+
+    #[doc(hidden)]
+    fn peek(&mut self) -> Result<u8>;
 }
 
 /// JSON input source that reads from a slice of bytes.
@@ -45,27 +48,44 @@ impl<'a> StrRead<'a> {
 
 impl<'a> Read<'a> for SliceRead<'a> {
     #[inline]
-    fn next(&mut self) -> Result<Option<u8>> {
-        // `Ok(self.slice.get(self.index).map(|ch| { self.index += 1; *ch }))`
-        // is about 10% slower.
-        Ok(if self.index < self.slice.len() {
-            let ch = self.slice[self.index];
-            self.index += 1;
-            Some(ch)
+    fn read_str(&mut self, len: usize) -> Result<&'a str>
+    {
+        if self.index + len - 1 < self.slice.len() {
+            let string = std::str::from_utf8(&self.slice[self.index..self.index+len]);
+            self.index += len;
+            match string
+            {
+                Ok(string) => Ok(string),
+                Err(e) => Err(Error::UTF8Error(e)) 
+            }
         } else {
-            None
-        })
+            Err(Error::IndexError)   
+        }
     }
 
     #[inline]
-    fn peek(&mut self) -> Result<Option<u8>> {
+    fn next(&mut self) -> Result<u8> {
+        // `Ok(self.slice.get(self.index).map(|ch| { self.index += 1; *ch }))`
+        // is about 10% slower.
+        if self.index < self.slice.len() {
+            let ch = self.slice[self.index];
+            self.index += 1;
+            Ok(ch)
+        } else {
+            Err(Error::IndexError)
+        }
+    }
+
+    #[inline]
+    fn peek(&mut self) -> Result<u8> {
         // `Ok(self.slice.get(self.index).map(|ch| *ch))` is about 10% slower
         // for some reason.
-        Ok(if self.index < self.slice.len() {
-            Some(self.slice[self.index])
-        } else {
-            None
-        })
+        if self.index < self.slice.len() {
+            Ok(self.slice[self.index])
+        } else
+        {
+            Err(Error::IndexError)
+        }
     }
 }
 
@@ -73,12 +93,18 @@ impl<'a> Read<'a> for SliceRead<'a> {
 // Shouldn't I ensure that it is valid UTF-8 for every next and peek?
 impl<'a> Read<'a> for StrRead<'a> {
     #[inline]
-    fn next(&mut self) -> Result<Option<u8>> {
+    fn read_str(&mut self, len: usize) -> Result<&'a str>
+    {
+        self.delegate.read_str(len)
+    }
+
+    #[inline]
+    fn next(&mut self) -> Result<u8> {
         self.delegate.next()
     }
 
     #[inline]
-    fn peek(&mut self) -> Result<Option<u8>> {
+    fn peek(&mut self) -> Result<u8> {
         self.delegate.peek()
     }
 }

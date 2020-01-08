@@ -20,6 +20,8 @@ pub enum Error {
     ExpectedListEnd,
     UnexpectedChar,
     TrailingCharacters,
+    IndexError,
+    UTF8Error(std::str::Utf8Error),
     /* Unsupported errors */
     BoolUnsupported
 }

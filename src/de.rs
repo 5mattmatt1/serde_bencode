@@ -1,6 +1,6 @@
 use std::ops::{AddAssign, MulAssign, Neg};
 
-use serde::Deserialize;
+// use serde::Deserialize;
 use serde::de::{
     // EnumAccess, IntoDeserializer, VariantAccess
     self, DeserializeSeed, Visitor, MapAccess, SeqAccess,
@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 
 pub use crate::read::{ Read, SliceRead, StrRead}; // IoRead,
 
-pub struct Deserializer<R> 
+pub struct Deserializer<R>
 {
     read: R,
     // This string starts with the input data and characters are truncated off
@@ -18,7 +18,9 @@ pub struct Deserializer<R>
     // input: &'de str,
 }
 
-impl<R> Deserializer<R> 
+impl<'de, R> Deserializer<R> 
+where
+    R: Read<'de>,
 {
     pub fn new(read: R) -> Self {
         Deserializer {
@@ -62,7 +64,31 @@ impl<'a> Deserializer<StrRead<'a>> {
     }
 }
 
-impl<'de, R: Read<'de>> Deserializer<R> {
+impl<'de, R> Read<'de> for Deserializer<R> 
+where
+    R: Read<'de>
+{
+
+    fn read_str(&mut self, len: usize) -> Result<&'de str>
+    {
+        self.read.read_str(len)
+    }
+
+    fn peek(&mut self) -> Result<u8> {
+        self.read.peek()
+    }
+
+    // Consume the first character in the input.
+    fn next(&mut self) -> Result<u8> 
+    {
+        self.read.next()
+    }
+}
+
+impl<'de, R> Deserializer<R> 
+where
+    R: Read<'de>
+{
     /// The `Deserializer::end` method should be called after a value has been fully deserialized.
     /// This allows the `Deserializer` to validate that the input stream is at the end or that it
     /// only has trailing whitespace.
@@ -72,38 +98,26 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         //     Some(_) => Err(self.peek_error(ErrorCode::TrailingCharacters)),
         //     None => Ok(()),
         // }
-        match self.peek()?
+        match self.peek()
         {
-            Some(_) => Err(Error::TrailingCharacters),
-            None => Ok(())
+            Ok(_) => Err(Error::TrailingCharacters),
+            Err(_) => Ok(())
         }
     }
 
-    fn peek(&mut self) -> Result<Option<u8>> {
-        self.read.peek()
-    }
-
-    // Consume the first character in the input.
-    fn next(&mut self) -> Result<Option<u8>> 
-    {
-        self.read.next()
-    }
-}
-
-impl<'de, R> Deserializer<R> {
     // Look at the first character in the input without consuming it.
 
     fn parse_signed<T>(&mut self) -> Result<T>
         where T: Neg<Output = T> + AddAssign<T> + MulAssign<T> + From<i8> + std::fmt::Display,
     {
         // TODO: Invalidate leading 0.
-        if self.next()? != 'i' {
+        if self.next()? as char != 'i' {
             return Err(Error::ExpectedI);
         }
 
-        let mut int = match self.next()? {
+        let mut int = match self.next()? as char {
             ch @ '0'..='9' => T::from(ch as i8 - b'0' as i8),
-            '-' => match self.next()? {
+            '-' => match self.next()? as char {
                 ch @ '0'..='9' => - T::from(ch as i8 - b'0' as i8),
                 _ => { 
                     return Err(Error::ExpectedInteger);
@@ -115,14 +129,17 @@ impl<'de, R> Deserializer<R> {
         };
 
         loop {
-            match self.input.chars().next() {
-                Some(ch @ '0'..= '9') => {
-                    self.input = &self.input[1..];
+            match self.next()? as char {
+                ch @ '0'..= '9' => {
+                    // self.input = &self.input[1..];
+                    // self.input.chars().next();
+                    // self.next();
                     int *= T::from(10);
                     int += T::from(ch as i8 - b'0' as i8);
                 }
-                Some('e') => {
-                    self.input = &self.input[1..];
+                'e' => {
+                    // self.input = &self.input[1..];
+                    // self.next();
                     return Ok(int);
                 }
                 _ => {
@@ -133,7 +150,7 @@ impl<'de, R> Deserializer<R> {
     }
 
     fn parse_string(&mut self) -> Result<&'de str> {
-        let mut len = match self.next()? {
+        let mut len = match self.next()? as char {
             ch @ '0'..='9' => usize::from(ch as u8 - b'0'),
             _ => {
                 return Err(Error::ExpectedInteger);
@@ -141,14 +158,14 @@ impl<'de, R> Deserializer<R> {
         };
 
         loop {
-            match self.input.chars().next() {
-                Some(ch @ '0'..='9') => {
-                    self.input = &self.input[1..];
+            match self.next()? as char {
+                ch @ '0'..='9' => {
+                    // self.input = &self.input[1..];
                     len *= 10 as usize;
                     len += usize::from(ch as u8 - b'0');
                 }
-                Some(':') => {
-                    self.input = &self.input[1..];
+                ':' => {
+                    // self.input = &self.input[1..];
                     break;
                 }
                 _ => {
@@ -156,21 +173,19 @@ impl<'de, R> Deserializer<R> {
                 }
             }
         }
-
-        let s = &self.input[..len];
-        
-        self.input = &self.input[len..];
-
-        Ok(s)
+        // Why is this unreachable?
+        self.read_str(len)
     }
 }
 
-/// Seem to need to implement Access for these guys instead of the deserializer.
+// Seem to need to implement Access for these guys instead of the deserializer.
 struct ColonSeparated<'a, R: 'a> {
     de: &'a mut Deserializer<R>,
 }
 
-impl<'a, R> ColonSeparated<'a, R> {
+impl<'a, R: 'a> ColonSeparated<'a, R>
+{
+
     fn new(de: &'a mut Deserializer<R>) -> Self {
         ColonSeparated {
             de
@@ -178,7 +193,11 @@ impl<'a, R> ColonSeparated<'a, R> {
     }
 }
 
-impl<'a, 'de, R> MapAccess<'de> for ColonSeparated<'a, R> {
+// impl<'de, R: 'de> MapAccess<'de> for ColonSeparated<'de, R> 
+impl<'de, 'a, R: Read<'de> + 'a> MapAccess<'de> for ColonSeparated<'a, R> 
+// where
+//     R: Read<'de>
+{
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -186,7 +205,7 @@ impl<'a, 'de, R> MapAccess<'de> for ColonSeparated<'a, R> {
         K: DeserializeSeed<'de>,
     {
         // Check if there are no more entries.
-        if self.de.peek()? == 'e' {
+        if self.de.peek()? as char == 'e' {
             return Ok(None);
         }
 
@@ -218,7 +237,8 @@ impl<'a, 'de, R> MapAccess<'de> for ColonSeparated<'a, R> {
 
 // `SeqAccess` is provided to the `Visitor` to give it the ability to iterate
 // through elements of the sequence.
-impl<'a, 'de, R> SeqAccess<'de> for ColonSeparated<'a, R> {
+impl<'de, 'a, R: Read<'de> + 'a> SeqAccess<'de> for ColonSeparated<'a, R> 
+{
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -226,7 +246,7 @@ impl<'a, 'de, R> SeqAccess<'de> for ColonSeparated<'a, R> {
         T: DeserializeSeed<'de>,
     {
         // Check if there are no more elements.
-        if self.de.peek()? == 'e' {
+        if self.de.peek()? as char == 'e' {
             return Ok(None);
         }
 
@@ -235,7 +255,8 @@ impl<'a, 'de, R> SeqAccess<'de> for ColonSeparated<'a, R> {
     }
 }
 
-impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
+impl<'de, 'a, R: Read<'de> + 'a> de::Deserializer<'de> for &'a mut Deserializer<R>
+{
     type Error = Error;
 
     // Look at the input data to decide what Serde data model type to
@@ -243,9 +264,9 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
     // Formats that support `deserialize_any` are known as self-describing.
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: Visitor,
+        V: Visitor<'de>,
     {
-        match self.peek()? {
+        match self.peek()? as char {
             'd' => self.deserialize_map(visitor),
             '0'..='9' => self.deserialize_str(visitor),
             _ => Err(Error::Syntax),
@@ -257,14 +278,14 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
     // method with a `SeqAccess` implementation.
     fn deserialize_map<V>(mut self, visitor: V) -> Result<V::Value>
     where
-        V: Visitor,
+        V: Visitor<'de>,
     {
         // Parse the opening brace of the map.
-        if self.next()? == 'd' {
+        if self.next()? as char == 'd' {
             // Visitor
-            let value = visitor.visit_map(ColonSeparated::new(&mut self))?;
+            let value = visitor.visit_map(ColonSeparated::new(& mut self))?;
             // Parse the closing brace of the map.
-            if self.next()? == 'e' {
+            if self.next()? as char == 'e' {
                 return Ok(value);
             } else {
                 return Err(Error::ExpectedMapEnd);
@@ -277,91 +298,91 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
 
     fn deserialize_bool<V>(self, _visitor: V) -> Result<V::Value>
     where
-        V: Visitor,
+        V: Visitor<'de>,
     {
         return Err(Error::BoolUnsupported);
     }
 
     fn deserialize_i8<V>(self, _visitor: V) -> Result<V::Value>
     where
-        V: Visitor,
+        V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_i16<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         visitor.visit_i32(self.parse_signed()?)
     }
 
     fn deserialize_i64<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_u8<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_u16<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_u32<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_u64<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_f32<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_f64<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         visitor.visit_borrowed_str(self.parse_string()?)
         // unimplemented!()
@@ -369,7 +390,7 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         self.deserialize_str(visitor)
         // unimplemented!()
@@ -377,28 +398,28 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
 
     fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_byte_buf<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
@@ -406,7 +427,7 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
     fn deserialize_unit_struct<V>(self, _name: &'static str, 
                                   _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
@@ -414,21 +435,21 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
     fn deserialize_newtype_struct<V>(self, _name: &'static str,
                                      _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
 
     fn deserialize_seq<V>(mut self, visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         // Parse the opening bracket of the sequence.
-        if self.next()? == 'l' {
+        if self.next()? as char == 'l' {
             // Give the visitor access to each element of the sequence.
             let value = visitor.visit_seq(ColonSeparated::new(&mut self))?;
             // Parse the closing bracket of the sequence.
-            if self.next()? == 'e' {
+            if self.next()? as char == 'e' {
                 Ok(value)
             } else {
                 Err(Error::ExpectedListEnd)
@@ -440,7 +461,7 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
 
     fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
@@ -448,7 +469,7 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
     fn deserialize_tuple_struct<V>(self, _name: &'static str,
                                    _len: usize, _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
@@ -457,7 +478,7 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
                              _fields: &'static [&'static str],
                              visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         self.deserialize_map(visitor)
     }
@@ -466,7 +487,7 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
                            _variants: &'static [&'static str],
                            _visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         unimplemented!()
     }
@@ -477,7 +498,7 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
     // numeric indices.
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         self.deserialize_str(visitor)
     }
@@ -495,13 +516,13 @@ impl<'a, 'de, R> de::Deserializer<'de> for &'a mut Deserializer<R> {
     // self-describing.
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value>
         where
-            V: Visitor,
+            V: Visitor<'de>,
     {
         self.deserialize_any(visitor)
     }
 }
 
-fn from_trait<'de, R, T>(read: R) -> Result<T>
+fn from_trait<'de, R: 'de, T>(read: R) -> Result<T>
 where
     R: Read<'de>,
     T: de::Deserialize<'de>,
