@@ -1,6 +1,7 @@
 pub mod de;
 pub mod error;
-mod ser;
+pub mod ser;
+mod read;
 
 #[cfg(test)]
 mod tests {
